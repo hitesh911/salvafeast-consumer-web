@@ -16,7 +16,9 @@ on:
   workflow_dispatch:
 
 env:
-  GCP_REGION: asia-south1
+  # Domain mappings are not available in asia-south1; use a supported region.
+  # https://docs.cloud.google.com/run/docs/mapping-custom-domains
+  GCP_REGION: asia-southeast1
   GAR_REPOSITORY: salvafeast
   IMAGE_NAME: salva-consumer-web
   CLOUD_RUN_SERVICE: salva-consumer-web
