@@ -32,7 +32,7 @@ function MenuPageContent({ params }: { params: { slug: string } }) {
   const categoryRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
-    setTableToken(tableToken);
+    if (tableToken) setTableToken(tableToken);
   }, [tableToken, setTableToken]);
 
   useEffect(() => {

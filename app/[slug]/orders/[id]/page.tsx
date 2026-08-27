@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   cancelOrder,
+  calcItemUnitPrice,
   fetchMenu,
   fetchMyOrderDetail,
   fetchOrderStatus,
@@ -23,7 +24,12 @@ import {
 import { isConsumerLoggedIn } from "@/lib/auth-store";
 import { useCart } from "@/lib/cart-store";
 import { getPlacedOrder } from "@/lib/order-cache";
-import type { OrderStatus, PublicOrderStatusResponse } from "@/lib/types";
+import type {
+  OrderItemResponse,
+  OrderStatus,
+  PublicOrderItemStatus,
+  PublicOrderStatusResponse,
+} from "@/lib/types";
 import { CheckoutUpiPayStep } from "@/components/checkout/checkout-upi-pay-step";
 import { OrderLineSummary } from "@/components/order-line-summary";
 import clsx from "clsx";
@@ -48,17 +54,6 @@ function statusIndex(status: OrderStatus): number {
   return idx >= 0 ? idx : 0;
 }
 
-function formatClock(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
 const REQUEST_CANCEL_STATUSES: OrderStatus[] = [
   "accepted",
   "preparing",
@@ -76,7 +71,7 @@ function OrderTrackingContent({
   const searchParams = useSearchParams();
   const tokenParam = searchParams.get("token");
   const fromAccount = searchParams.get("from") === "account";
-  const { addLine, setMenuContext } = useCart();
+  const { addLine, setMenuContext, clearCart, tableToken } = useCart();
 
   const cachedOrder = getPlacedOrder(params.slug, params.id);
   const [trackingToken, setTrackingToken] = useState<string | null>(tokenParam);
@@ -87,6 +82,7 @@ function OrderTrackingContent({
   const [itemNames, setItemNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
   const [cancelAction, setCancelAction] = useState<
     "cancel" | "request" | null
@@ -233,37 +229,96 @@ function OrderTrackingContent({
 
   async function handleReorder() {
     setReordering(true);
+    setActionMessage(null);
     try {
       const menu = await fetchMenu(params.slug);
       setMenuContext(menu);
-      const detail =
-        cachedOrder ??
-        (isConsumerLoggedIn()
-          ? await fetchMyOrderDetail(params.id).then((r) => ({
-              order: r.order,
-              upi_payment_link: null,
-              tracking_token: r.tracking_token,
-            }))
-          : null);
 
-      if (!detail) return;
+      type ReorderLine = {
+        menu_item_id: string;
+        variant_id: string | null;
+        quantity: number;
+        notes: string | null;
+        addons: { addon_id: string }[];
+      };
 
-      for (const line of detail.order.items) {
+      function fromDetailItems(items: OrderItemResponse[]): ReorderLine[] {
+        return items.map((line) => ({
+          menu_item_id: line.menu_item_id,
+          variant_id: line.variant_id,
+          quantity: line.quantity,
+          notes: line.notes,
+          addons: line.addons.map((a) => ({ addon_id: a.addon_id })),
+        }));
+      }
+
+      function fromStatusItems(items: PublicOrderItemStatus[]): ReorderLine[] {
+        return items.map((line) => ({
+          menu_item_id: line.menu_item_id,
+          variant_id: line.variant_id,
+          quantity: line.quantity,
+          notes: line.notes,
+          addons: (line.addons ?? []).map((a) => ({ addon_id: a.addon_id })),
+        }));
+      }
+
+      let lines: ReorderLine[] | null = null;
+      if (cachedOrder?.order?.items?.length) {
+        lines = fromDetailItems(cachedOrder.order.items);
+      } else if (isConsumerLoggedIn()) {
+        try {
+          const mine = await fetchMyOrderDetail(params.id);
+          if (mine.order?.items?.length) {
+            lines = fromDetailItems(mine.order.items);
+          }
+        } catch {
+          /* fall through to status items */
+        }
+      }
+      if (!lines?.length && order?.items?.length) {
+        lines = fromStatusItems(order.items);
+      }
+
+      if (!lines?.length) {
+        setActionMessage(
+          "Couldn’t reload this order. Try opening the menu and adding items again.",
+        );
+        return;
+      }
+
+      clearCart();
+      let added = 0;
+      let skipped = 0;
+
+      for (const line of lines) {
         const menuItem = menu.menu
           .flatMap((c) => c.items)
           .find((item) => item.id === line.menu_item_id);
-        if (!menuItem) continue;
-        const variant = menuItem.variants.find((v) => v.id === line.variant_id);
+        if (!menuItem) {
+          skipped += 1;
+          continue;
+        }
+        const variant = line.variant_id
+          ? menuItem.variants.find((v) => v.id === line.variant_id)
+          : null;
+        if (line.variant_id && !variant) {
+          skipped += 1;
+          continue;
+        }
         const addonIds = new Set(line.addons.map((a) => a.addon_id));
         const addons = menuItem.addons
           .filter((a) => addonIds.has(a.id))
           .map((a) => ({ id: a.id, name: a.name, price: a.price }));
-        const unitPrice = parseFloat(line.item_price_at_order);
+        const unitPrice = calcItemUnitPrice(
+          menuItem.base_price,
+          variant?.price_delta,
+          addons.map((a) => a.price),
+        );
 
         addLine({
           menuItemId: line.menu_item_id,
           name: menuItem.name,
-          variantId: line.variant_id,
+          variantId: variant?.id ?? null,
           variantName: variant?.name ?? null,
           addons,
           quantity: line.quantity,
@@ -272,8 +327,26 @@ function OrderTrackingContent({
           dietaryType: menuItem.dietary_type,
           notes: line.notes ?? undefined,
         });
+        added += 1;
+      }
+
+      if (added === 0) {
+        setActionMessage(
+          skipped > 0
+            ? "Those items are no longer available on the menu."
+            : "Couldn’t add items to your cart.",
+        );
+        return;
+      }
+
+      if (skipped > 0) {
+        setActionMessage(
+          `${skipped} item${skipped === 1 ? "" : "s"} unavailable and skipped.`,
+        );
       }
       router.push(`/${params.slug}/cart`);
+    } catch {
+      setActionMessage("Something went wrong while rebuilding your cart.");
     } finally {
       setReordering(false);
     }
@@ -435,6 +508,12 @@ function OrderTrackingContent({
               </div>
             ) : null}
 
+            {actionMessage ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                {actionMessage}
+              </div>
+            ) : null}
+
             {showQueueCard || showReadyCard ? (
               <div className="rounded-xl border border-brand/20 bg-brand/5 p-5">
                 {showReadyCard ? (
@@ -462,17 +541,6 @@ function OrderTrackingContent({
                         Position #{order.queue_position} in the kitchen queue
                       </p>
                     ) : null}
-                    {order.estimated_wait_minutes != null ? (
-                      <p className="mt-3 text-sm font-medium text-stone-800">
-                        Ready in about {order.estimated_wait_minutes} min
-                        {order.estimated_ready_at
-                          ? ` · around ${formatClock(order.estimated_ready_at)}`
-                          : null}
-                      </p>
-                    ) : null}
-                    <p className="mt-1 text-xs text-stone-500">
-                      Estimate based on recent orders — may change.
-                    </p>
                   </>
                 )}
               </div>
@@ -565,7 +633,11 @@ function OrderTrackingContent({
         </button>
 
         <Link
-          href={`/${params.slug}/menu`}
+          href={
+            tableToken
+              ? `/${params.slug}/menu?t=${encodeURIComponent(tableToken)}`
+              : `/${params.slug}/menu`
+          }
           className="block w-full rounded-xl border border-stone-200 bg-white py-3 text-center text-sm font-medium text-stone-700"
         >
           Order more

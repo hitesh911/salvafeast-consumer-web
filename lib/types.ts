@@ -150,11 +150,17 @@ export interface OrderPlacementResponse {
   tracking_token: string;
 }
 
+export interface PublicOrderItemAddonStatus {
+  addon_id: string;
+}
+
 export interface PublicOrderItemStatus {
   menu_item_id: string;
+  variant_id: string | null;
   quantity: number;
   item_price_at_order: string;
   notes: string | null;
+  addons: PublicOrderItemAddonStatus[];
 }
 
 export interface PublicOrderStatusResponse {
