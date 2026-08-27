@@ -242,25 +242,23 @@ function OrderTrackingContent({
         addons: { addon_id: string }[];
       };
 
-      function fromDetailItems(items: OrderItemResponse[]): ReorderLine[] {
-        return items.map((line) => ({
+      const fromDetailItems = (items: OrderItemResponse[]): ReorderLine[] =>
+        items.map((line) => ({
           menu_item_id: line.menu_item_id,
           variant_id: line.variant_id,
           quantity: line.quantity,
           notes: line.notes,
           addons: line.addons.map((a) => ({ addon_id: a.addon_id })),
         }));
-      }
 
-      function fromStatusItems(items: PublicOrderItemStatus[]): ReorderLine[] {
-        return items.map((line) => ({
+      const fromStatusItems = (items: PublicOrderItemStatus[]): ReorderLine[] =>
+        items.map((line) => ({
           menu_item_id: line.menu_item_id,
           variant_id: line.variant_id,
           quantity: line.quantity,
           notes: line.notes,
           addons: (line.addons ?? []).map((a) => ({ addon_id: a.addon_id })),
         }));
-      }
 
       let lines: ReorderLine[] | null = null;
       if (cachedOrder?.order?.items?.length) {
