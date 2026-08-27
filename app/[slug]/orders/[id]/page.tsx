@@ -162,14 +162,16 @@ function OrderTrackingContent({
     }
   }, [cachedOrder]);
 
-  const displayItems = useMemo(() => {
+  const displayItems = useMemo((): PublicOrderItemStatus[] => {
     if (order?.items?.length) return order.items;
     if (cachedOrder?.order.items) {
       return cachedOrder.order.items.map((item) => ({
         menu_item_id: item.menu_item_id,
+        variant_id: item.variant_id,
         quantity: item.quantity,
         item_price_at_order: item.item_price_at_order,
         notes: item.notes,
+        addons: item.addons.map((a) => ({ addon_id: a.addon_id })),
       }));
     }
     return [];
