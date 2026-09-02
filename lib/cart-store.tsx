@@ -40,6 +40,7 @@ interface CartContextValue {
   menuContext: PublicMenuResponse | null;
   setMenuContext: (ctx: PublicMenuResponse | null) => void;
   setTableToken: (token: string | null) => void;
+  persistTableToken: (token: string | null) => void;
   addLine: (line: Omit<CartLine, "key">) => void;
   updateQuantity: (key: string, quantity: number) => void;
   updateLineNotes: (key: string, notes: string) => void;
@@ -96,6 +97,31 @@ export function CartProvider({
   const setTableToken = useCallback((token: string | null) => {
     setTableTokenState(token);
   }, []);
+
+  const persistTableToken = useCallback(
+    (token: string | null) => {
+      setTableTokenState(token);
+      try {
+        const raw = sessionStorage.getItem(storageKey(slug));
+        const parsed = raw
+          ? (JSON.parse(raw) as {
+              lines?: CartLine[];
+              tableToken?: string | null;
+            })
+          : { lines: [] };
+        sessionStorage.setItem(
+          storageKey(slug),
+          JSON.stringify({
+            lines: parsed.lines ?? [],
+            tableToken: token,
+          }),
+        );
+      } catch {
+        /* ignore corrupt storage */
+      }
+    },
+    [slug],
+  );
 
   const addLine = useCallback((line: Omit<CartLine, "key">) => {
     const key = buildCartLineKey(
@@ -194,6 +220,7 @@ export function CartProvider({
       menuContext,
       setMenuContext,
       setTableToken,
+      persistTableToken,
       addLine,
       updateQuantity,
       updateLineNotes,
@@ -208,6 +235,7 @@ export function CartProvider({
       tableToken,
       menuContext,
       setTableToken,
+      persistTableToken,
       addLine,
       updateQuantity,
       updateLineNotes,

@@ -1,8 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   Clock,
@@ -11,10 +10,10 @@ import {
   Loader2,
   XCircle,
   ExternalLink,
+  ArrowLeft,
 } from "lucide-react";
 import {
   cancelOrder,
-  calcItemUnitPrice,
   fetchMenu,
   fetchMyOrderDetail,
   fetchOrderStatus,
@@ -24,8 +23,12 @@ import {
 import { isConsumerLoggedIn } from "@/lib/auth-store";
 import { useCart } from "@/lib/cart-store";
 import { getPlacedOrder } from "@/lib/order-cache";
+import {
+  keyFromOrderItem,
+  labelsFromCache,
+  resolveLabelFromMenu,
+} from "@/lib/order-line-labels";
 import type {
-  OrderItemResponse,
   OrderStatus,
   PublicOrderItemStatus,
   PublicOrderStatusResponse,
@@ -67,26 +70,37 @@ function OrderTrackingContent({
 }: {
   params: { slug: string; id: string };
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const tokenParam = searchParams.get("token");
   const fromAccount = searchParams.get("from") === "account";
-  const { addLine, setMenuContext, clearCart, tableToken } = useCart();
+  const { tableToken, persistTableToken } = useCart();
 
-  const cachedOrder = getPlacedOrder(params.slug, params.id);
+  const cachedOrder = useMemo(
+    () => getPlacedOrder(params.slug, params.id),
+    [params.slug, params.id],
+  );
   const [trackingToken, setTrackingToken] = useState<string | null>(tokenParam);
   const [upiLink, setUpiLink] = useState<string | null>(
     cachedOrder?.upi_payment_link ?? null,
   );
   const [order, setOrder] = useState<PublicOrderStatusResponse | null>(null);
-  const [itemNames, setItemNames] = useState<Record<string, string>>({});
+  const [itemLabels, setItemLabels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [reordering, setReordering] = useState(false);
   const [cancelAction, setCancelAction] = useState<
     "cancel" | "request" | null
   >(null);
+
+  const effectiveTableToken =
+    tableToken ?? cachedOrder?.table_qr_token ?? null;
+
+  const menuHref = useMemo(() => {
+    const base = `/${params.slug}/menu`;
+    if (effectiveTableToken) {
+      return `${base}?t=${encodeURIComponent(effectiveTableToken)}`;
+    }
+    return base;
+  }, [params.slug, effectiveTableToken]);
 
   useEffect(() => {
     if (tokenParam) {
@@ -152,16 +166,6 @@ function OrderTrackingContent({
     };
   }, [params.slug, params.id, trackingToken, fromAccount]);
 
-  useEffect(() => {
-    if (cachedOrder?.order.items) {
-      const names: Record<string, string> = {};
-      cachedOrder.order.items.forEach((item) => {
-        names[item.menu_item_id] = `Item`;
-      });
-      setItemNames(names);
-    }
-  }, [cachedOrder]);
-
   const displayItems = useMemo((): PublicOrderItemStatus[] => {
     if (order?.items?.length) return order.items;
     if (cachedOrder?.order.items) {
@@ -176,6 +180,72 @@ function OrderTrackingContent({
     }
     return [];
   }, [order, cachedOrder]);
+
+  const displayItemsKey = useMemo(
+    () => displayItems.map((item) => keyFromOrderItem(item)).join("|"),
+    [displayItems],
+  );
+
+  const cachedLabelsKey = useMemo(
+    () => JSON.stringify(cachedOrder?.line_labels ?? []),
+    [cachedOrder],
+  );
+
+  useEffect(() => {
+    function setLabelsIfChanged(next: string[]) {
+      setItemLabels((prev) =>
+        prev.length === next.length && prev.every((label, index) => label === next[index])
+          ? prev
+          : next,
+      );
+    }
+
+    if (displayItems.length === 0) {
+      setLabelsIfChanged([]);
+      return;
+    }
+
+    const cached = labelsFromCache(
+      displayItems,
+      cachedOrder?.line_labels,
+    );
+    if (cached.every((label) => label.trim())) {
+      setLabelsIfChanged(cached);
+      return;
+    }
+
+    let cancelled = false;
+    fetchMenu(params.slug, effectiveTableToken)
+      .then((menu) => {
+        if (cancelled) return;
+        setLabelsIfChanged(
+          displayItems.map((item, index) => {
+            const fromCache = cached[index]?.trim();
+            if (fromCache) return fromCache;
+            return resolveLabelFromMenu(menu, item, index);
+          }),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLabelsIfChanged(
+          displayItems.map((_item, index) =>
+            cached[index]?.trim() || `Item ${index + 1}`,
+          ),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayItemsKey, cachedLabelsKey, effectiveTableToken, params.slug]);
+
+  function goToMenu() {
+    if (effectiveTableToken) {
+      persistTableToken(effectiveTableToken);
+    }
+    window.location.assign(menuHref);
+  }
 
   async function handleCancelOrder() {
     if (!trackingToken || !order) return;
@@ -229,129 +299,6 @@ function OrderTrackingContent({
     }
   }
 
-  async function handleReorder() {
-    setReordering(true);
-    setActionMessage(null);
-    try {
-      const menu = await fetchMenu(params.slug);
-      setMenuContext(menu);
-
-      type ReorderLine = {
-        menu_item_id: string;
-        variant_id: string | null;
-        quantity: number;
-        notes: string | null;
-        addons: { addon_id: string }[];
-      };
-
-      const fromDetailItems = (items: OrderItemResponse[]): ReorderLine[] =>
-        items.map((line) => ({
-          menu_item_id: line.menu_item_id,
-          variant_id: line.variant_id,
-          quantity: line.quantity,
-          notes: line.notes,
-          addons: line.addons.map((a) => ({ addon_id: a.addon_id })),
-        }));
-
-      const fromStatusItems = (items: PublicOrderItemStatus[]): ReorderLine[] =>
-        items.map((line) => ({
-          menu_item_id: line.menu_item_id,
-          variant_id: line.variant_id,
-          quantity: line.quantity,
-          notes: line.notes,
-          addons: (line.addons ?? []).map((a) => ({ addon_id: a.addon_id })),
-        }));
-
-      let lines: ReorderLine[] | null = null;
-      if (cachedOrder?.order?.items?.length) {
-        lines = fromDetailItems(cachedOrder.order.items);
-      } else if (isConsumerLoggedIn()) {
-        try {
-          const mine = await fetchMyOrderDetail(params.id);
-          if (mine.order?.items?.length) {
-            lines = fromDetailItems(mine.order.items);
-          }
-        } catch {
-          /* fall through to status items */
-        }
-      }
-      if (!lines?.length && order?.items?.length) {
-        lines = fromStatusItems(order.items);
-      }
-
-      if (!lines?.length) {
-        setActionMessage(
-          "Couldn’t reload this order. Try opening the menu and adding items again.",
-        );
-        return;
-      }
-
-      clearCart();
-      let added = 0;
-      let skipped = 0;
-
-      for (const line of lines) {
-        const menuItem = menu.menu
-          .flatMap((c) => c.items)
-          .find((item) => item.id === line.menu_item_id);
-        if (!menuItem) {
-          skipped += 1;
-          continue;
-        }
-        const variant = line.variant_id
-          ? menuItem.variants.find((v) => v.id === line.variant_id)
-          : null;
-        if (line.variant_id && !variant) {
-          skipped += 1;
-          continue;
-        }
-        const addonIds = new Set(line.addons.map((a) => a.addon_id));
-        const addons = menuItem.addons
-          .filter((a) => addonIds.has(a.id))
-          .map((a) => ({ id: a.id, name: a.name, price: a.price }));
-        const unitPrice = calcItemUnitPrice(
-          menuItem.base_price,
-          variant?.price_delta,
-          addons.map((a) => a.price),
-        );
-
-        addLine({
-          menuItemId: line.menu_item_id,
-          name: menuItem.name,
-          variantId: variant?.id ?? null,
-          variantName: variant?.name ?? null,
-          addons,
-          quantity: line.quantity,
-          unitPrice,
-          imageUrl: menuItem.images[0]?.image_url ?? null,
-          dietaryType: menuItem.dietary_type,
-          notes: line.notes ?? undefined,
-        });
-        added += 1;
-      }
-
-      if (added === 0) {
-        setActionMessage(
-          skipped > 0
-            ? "Those items are no longer available on the menu."
-            : "Couldn’t add items to your cart.",
-        );
-        return;
-      }
-
-      if (skipped > 0) {
-        setActionMessage(
-          `${skipped} item${skipped === 1 ? "" : "s"} unavailable and skipped.`,
-        );
-      }
-      router.push(`/${params.slug}/cart`);
-    } catch {
-      setActionMessage("Something went wrong while rebuilding your cart.");
-    } finally {
-      setReordering(false);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
@@ -366,12 +313,16 @@ function OrderTrackingContent({
         <XCircle className="mb-4 h-12 w-12 text-red-400" />
         <p className="text-lg font-medium text-stone-800">Order not found</p>
         <p className="mt-2 text-sm text-stone-500">{error}</p>
-        <Link
-          href={`/${params.slug}/menu`}
+        <a
+          href={menuHref}
+          onClick={(event) => {
+            event.preventDefault();
+            goToMenu();
+          }}
           className="mt-6 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-white"
         >
           Back to menu
-        </Link>
+        </a>
       </div>
     );
   }
@@ -396,18 +347,30 @@ function OrderTrackingContent({
     order.payment_status === "unpaid" &&
     (order.payment_collection === "upi" || Boolean(order.upi_vpa));
 
+  function handleBack() {
+    goToMenu();
+  }
+
   return (
-    <div className="min-h-dvh bg-stone-50 pb-8">
-      <header className="border-b border-stone-200 bg-white px-4 py-6 text-center">
-        <p className="text-sm text-stone-500">Order tracking</p>
-        <h1 className="mt-1 text-2xl font-bold text-stone-900">
-          {formatPrice(order.total_amount)}
-        </h1>
-        {order.table_number && (
-          <p className="mt-1 text-sm text-stone-500">
-            Table {order.table_number}
-          </p>
-        )}
+    <div className="min-h-dvh bg-stone-50 pb-28 safe-bottom">
+      <header className="sticky top-0 z-40 border-b border-stone-200 bg-white px-4 py-4">
+        <div className="mx-auto flex max-w-lg items-center gap-3">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100"
+            aria-label="Back to menu"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold text-stone-900">Order tracking</h1>
+            <p className="text-sm text-stone-500">
+              {formatPrice(order.total_amount)}
+              {order.table_number ? ` · Table ${order.table_number}` : ""}
+            </p>
+          </div>
+        </div>
       </header>
 
       <div className="mx-auto max-w-lg space-y-4 px-4 py-6">
@@ -425,7 +388,7 @@ function OrderTrackingContent({
           </a>
         ) : null}
 
-        <OrderLineSummary items={displayItems} itemNames={itemNames} />
+        <OrderLineSummary items={displayItems} labels={itemLabels} />
 
         {isCancelled ? (
           <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
@@ -505,12 +468,6 @@ function OrderTrackingContent({
             {error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                 {error}
-              </div>
-            ) : null}
-
-            {actionMessage ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                {actionMessage}
               </div>
             ) : null}
 
@@ -623,25 +580,16 @@ function OrderTrackingContent({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleReorder}
-          disabled={reordering}
-          className="block w-full rounded-xl border border-brand py-3 text-center text-sm font-medium text-brand disabled:opacity-50"
-        >
-          {reordering ? "Adding to cart…" : "Order again"}
-        </button>
-
-        <Link
-          href={
-            tableToken
-              ? `/${params.slug}/menu?t=${encodeURIComponent(tableToken)}`
-              : `/${params.slug}/menu`
-          }
-          className="block w-full rounded-xl border border-stone-200 bg-white py-3 text-center text-sm font-medium text-stone-700"
+        <a
+          href={menuHref}
+          onClick={(event) => {
+            event.preventDefault();
+            goToMenu();
+          }}
+          className="relative z-10 block w-full rounded-xl bg-brand py-3.5 text-center text-sm font-semibold text-white shadow-lg active:scale-[0.99]"
         >
           Order more
-        </Link>
+        </a>
       </div>
     </div>
   );

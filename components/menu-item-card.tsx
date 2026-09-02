@@ -9,10 +9,9 @@ import clsx from "clsx";
 
 interface MenuItemCardProps {
   item: PublicMenuItem;
-  onOpenDetail?: () => void;
 }
 
-export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
+export function MenuItemCard({ item }: MenuItemCardProps) {
   const { addLine } = useCart();
   const [expanded, setExpanded] = useState(false);
   const [variantId, setVariantId] = useState<string | null>(null);
@@ -108,22 +107,7 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
   }
 
   return (
-    <article
-      className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm"
-      onClick={onOpenDetail}
-      role={onOpenDetail ? "button" : undefined}
-      tabIndex={onOpenDetail ? 0 : undefined}
-      onKeyDown={
-        onOpenDetail
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onOpenDetail();
-              }
-            }
-          : undefined
-      }
-    >
+    <article className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
       <div className="flex gap-3 p-3">
         {imageUrl ? (
           <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-stone-100">
@@ -213,7 +197,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
       </div>
 
       {expanded && (
-        <div className="border-t border-stone-100 bg-stone-50 px-3 py-3">
+        <div
+          className="border-t border-stone-100 bg-stone-50 px-3 py-3"
+          onClick={(event) => event.stopPropagation()}
+        >
           {item.variants.length > 0 && (
             <div className="mb-3">
               <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-stone-500">
@@ -223,7 +210,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
                 {item.variants.length > 1 ? null : (
                   <button
                     type="button"
-                    onClick={() => setVariantId(null)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setVariantId(null);
+                    }}
                     className={clsx(
                       "rounded-lg border px-3 py-1.5 text-sm transition-colors",
                       variantId === null
@@ -240,7 +230,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setVariantId(v.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setVariantId(v.id);
+                    }}
                     className={clsx(
                       "rounded-lg border px-3 py-1.5 text-sm transition-colors",
                       variantId === v.id
@@ -267,6 +260,7 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
                   <label
                     key={addon.id}
                     className="flex cursor-pointer items-center justify-between rounded-lg border border-stone-200 bg-white px-3 py-2"
+                    onClick={(event) => event.stopPropagation()}
                   >
                     <span className="flex items-center gap-2 text-sm">
                       <input
@@ -290,7 +284,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
             <div className="flex items-center gap-3 rounded-lg border border-stone-200 bg-white px-2 py-1">
               <button
                 type="button"
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setQuantity((q) => Math.max(1, q - 1));
+                }}
                 className="rounded p-1 text-stone-500 hover:text-stone-800"
                 aria-label="Decrease quantity"
               >
@@ -301,7 +298,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
               </span>
               <button
                 type="button"
-                onClick={() => setQuantity((q) => q + 1)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setQuantity((q) => q + 1);
+                }}
                 className="rounded p-1 text-stone-500 hover:text-stone-800"
                 aria-label="Increase quantity"
               >
@@ -311,7 +311,10 @@ export function MenuItemCard({ item, onOpenDetail }: MenuItemCardProps) {
 
             <button
               type="button"
-              onClick={handleCustomAdd}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleCustomAdd();
+              }}
               disabled={item.variants.length > 1 && !variantId}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-40 active:scale-95"
             >

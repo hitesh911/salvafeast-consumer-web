@@ -3,10 +3,10 @@ import type { PublicOrderItemStatus } from "@/lib/types";
 
 type OrderLineSummaryProps = {
   items: PublicOrderItemStatus[];
-  itemNames?: Record<string, string>;
+  labels?: string[];
 };
 
-export function OrderLineSummary({ items, itemNames = {} }: OrderLineSummaryProps) {
+export function OrderLineSummary({ items, labels = [] }: OrderLineSummaryProps) {
   if (items.length === 0) return null;
 
   return (
@@ -19,7 +19,7 @@ export function OrderLineSummary({ items, itemNames = {} }: OrderLineSummaryProp
           <li key={`${item.menu_item_id}-${index}`} className="flex justify-between gap-2">
             <span className="text-stone-700">
               {item.quantity}×{" "}
-              {itemNames[item.menu_item_id] ?? `Item ${index + 1}`}
+              {labels[index]?.trim() || `Item ${index + 1}`}
               {item.notes ? (
                 <span className="block text-xs italic text-stone-400">{item.notes}</span>
               ) : null}

@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { isConsumerLoggedIn } from "@/lib/auth-store";
 import { useCart } from "@/lib/cart-store";
+import { buildCartLineLabel } from "@/lib/order-line-labels";
 import { savePlacedOrder } from "@/lib/order-cache";
 import type { OrderType, PaymentCollection } from "@/lib/types";
 import { isUpiConfigured } from "@/lib/upi-utils";
@@ -201,7 +202,20 @@ export default function CheckoutPage({ params }: { params: { slug: string } }) {
       };
 
       const result = await placeOrder(params.slug, payload);
-      savePlacedOrder(params.slug, result.order.id, result);
+      savePlacedOrder(params.slug, result.order.id, {
+        ...result,
+        table_qr_token: orderType === "dine_in" ? selectedTableToken : null,
+        line_labels: lines.map((line) => ({
+          menu_item_id: line.menuItemId,
+          variant_id: line.variantId,
+          addon_ids: line.addons.map((addon) => addon.id),
+          label: buildCartLineLabel(
+            line.name,
+            line.variantName,
+            line.addons.map((addon) => addon.name),
+          ),
+        })),
+      });
       clearCart();
       router.push(
         `/${params.slug}/orders/${result.order.id}?token=${encodeURIComponent(result.tracking_token)}`,

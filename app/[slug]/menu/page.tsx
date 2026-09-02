@@ -7,12 +7,11 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { fetchMenu } from "@/lib/api";
 import { useCart } from "@/lib/cart-store";
-import type { DietaryType, PublicMenuItem, PublicMenuResponse } from "@/lib/types";
+import type { DietaryType, PublicMenuResponse } from "@/lib/types";
 import { MenuItemCard } from "@/components/menu-item-card";
 import { CartBar } from "@/components/cart-bar";
 import { MenuSearchBar } from "@/components/menu-search-bar";
 import { MenuCategoryTabs } from "@/components/menu-category-tabs";
-import { MenuItemSheet } from "@/components/menu-item-sheet";
 
 type DietaryFilter = "all" | DietaryType;
 
@@ -28,7 +27,6 @@ function MenuPageContent({ params }: { params: { slug: string } }) {
   const [search, setSearch] = useState("");
   const [dietaryFilter, setDietaryFilter] = useState<DietaryFilter>("all");
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-  const [sheetItem, setSheetItem] = useState<PublicMenuItem | null>(null);
   const categoryRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
@@ -213,10 +211,7 @@ function MenuPageContent({ params }: { params: { slug: string } }) {
                         "rounded-xl ring-2 ring-brand ring-offset-2",
                     )}
                   >
-                    <MenuItemCard
-                      item={item}
-                      onOpenDetail={() => setSheetItem(item)}
-                    />
+                    <MenuItemCard item={item} />
                   </div>
                 ))}
               </div>
@@ -226,7 +221,6 @@ function MenuPageContent({ params }: { params: { slug: string } }) {
       </div>
 
       <CartBar slug={params.slug} />
-      <MenuItemSheet item={sheetItem} onClose={() => setSheetItem(null)} />
     </div>
   );
 }

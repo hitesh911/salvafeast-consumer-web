@@ -1,11 +1,17 @@
 import type { OrderPlacementResponse } from "./types";
+import type { OrderLineLabel } from "./order-line-labels";
 
 const PREFIX = "salva-order-cache:";
+
+export type PlacedOrderCache = OrderPlacementResponse & {
+  table_qr_token?: string | null;
+  line_labels?: OrderLineLabel[];
+};
 
 export function savePlacedOrder(
   slug: string,
   orderId: string,
-  payload: OrderPlacementResponse,
+  payload: PlacedOrderCache,
 ): void {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(
@@ -17,12 +23,12 @@ export function savePlacedOrder(
 export function getPlacedOrder(
   slug: string,
   orderId: string,
-): OrderPlacementResponse | null {
+): PlacedOrderCache | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(`${PREFIX}${slug}:${orderId}`);
     if (!raw) return null;
-    return JSON.parse(raw) as OrderPlacementResponse;
+    return JSON.parse(raw) as PlacedOrderCache;
   } catch {
     return null;
   }

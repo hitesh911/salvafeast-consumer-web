@@ -3,16 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bell, BellOff, Loader2 } from "lucide-react";
 
-import { updatePushToken } from "@/lib/api";
 import {
-  clearStoredPushRegistration,
+  areOrderNotificationsEnabled,
+  disableOrderNotifications,
+  enableOrderNotifications,
+  PUSH_BLOCKED_MESSAGE,
+} from "@/lib/order-push";
+import {
   getPushPermissionState,
-  getStoredPushTokenFingerprint,
   isPushSupported,
-  markPushTokenRegistered,
-  registerServiceWorker,
-  serializePushSubscription,
-  subscribeToPush,
+  isVapidConfigured,
 } from "@/lib/push-notifications";
 
 export function PushNotificationsCard() {
@@ -20,52 +20,30 @@ export function PushNotificationsCard() {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [vapidConfigured, setVapidConfigured] = useState(true);
+  const vapidConfigured = isVapidConfigured();
 
-  useEffect(() => {
+  const refreshState = useCallback(async () => {
     setPermission(getPushPermissionState());
-    setEnabled(Boolean(getStoredPushTokenFingerprint()));
-    setVapidConfigured(Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim()));
+    setEnabled(await areOrderNotificationsEnabled());
   }, []);
 
+  useEffect(() => {
+    void refreshState();
+  }, [refreshState]);
+
   const enableNotifications = useCallback(async () => {
-    if (!isPushSupported()) {
-      setMessage("Notifications are not supported in this browser.");
-      return;
-    }
-
-    if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim()) {
-      setMessage("Push is not configured on this environment yet.");
-      return;
-    }
-
     setLoading(true);
     setMessage(null);
 
     try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
+      const result = await enableOrderNotifications();
+      setPermission(getPushPermissionState());
 
-      if (result !== "granted") {
-        setMessage("Permission denied. Enable notifications in browser settings.");
+      if (!result.ok) {
+        setMessage(result.message);
         return;
       }
 
-      const registration = await registerServiceWorker();
-      if (!registration) {
-        setMessage("Could not register the app for notifications.");
-        return;
-      }
-
-      const subscription = await subscribeToPush(registration);
-      if (!subscription) {
-        setMessage("Could not subscribe to push notifications.");
-        return;
-      }
-
-      const token = serializePushSubscription(subscription);
-      await updatePushToken(token);
-      markPushTokenRegistered(token);
       setEnabled(true);
       setMessage("Live order alerts enabled for this device.");
     } catch {
@@ -79,10 +57,11 @@ export function PushNotificationsCard() {
     setLoading(true);
     setMessage(null);
     try {
-      const registration = await navigator.serviceWorker.getRegistration();
-      const subscription = await registration?.pushManager.getSubscription();
-      await subscription?.unsubscribe();
-      clearStoredPushRegistration();
+      const result = await disableOrderNotifications();
+      if (!result.ok) {
+        setMessage(result.message ?? "Could not turn off notifications.");
+        return;
+      }
       setEnabled(false);
       setMessage("Notifications turned off on this device.");
     } catch {
@@ -95,6 +74,8 @@ export function PushNotificationsCard() {
   if (!isPushSupported()) {
     return null;
   }
+
+  const blocked = permission === "denied";
 
   return (
     <section className="mb-6 rounded-xl border border-stone-200 bg-white p-4">
@@ -113,6 +94,11 @@ export function PushNotificationsCard() {
           {!vapidConfigured ? (
             <p className="mt-2 text-xs text-amber-700">
               Push is not configured in this environment.
+            </p>
+          ) : null}
+          {blocked && !enabled ? (
+            <p className="mt-2 text-xs leading-relaxed text-amber-800">
+              {PUSH_BLOCKED_MESSAGE}
             </p>
           ) : null}
           {message ? (
@@ -136,13 +122,13 @@ export function PushNotificationsCard() {
               <button
                 type="button"
                 onClick={() => void enableNotifications()}
-                disabled={loading || permission === "denied" || !vapidConfigured}
+                disabled={loading || !vapidConfigured}
                 className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
                 {loading ? (
                   <Loader2 className="inline h-4 w-4 animate-spin" />
-                ) : permission === "denied" ? (
-                  "Blocked in browser"
+                ) : blocked ? (
+                  "Check again"
                 ) : (
                   "Enable notifications"
                 )}

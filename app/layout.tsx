@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { PushNotificationPrompt } from "@/components/push-notification-prompt";
 import { PwaProvider } from "@/components/pwa-provider";
 import "./globals.css";
 
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} font-sans min-h-dvh`}>
         <PwaProvider />
+        <PushNotificationPrompt />
         {children}
       </body>
     </html>
